@@ -109,9 +109,15 @@ func getVolumeParameters(logger *zap.Logger, req *csi.CreateVolumeRequest, confi
 	for key, value := range req.GetParameters() {
 		allParameters[key] = value
 	}
-	for key, value := range req.GetMutableParameters() {
-		logger.Info("VolumeAttributesClass parameter detected", zap.String("key", key), zap.String("value", value))
-		allParameters[key] = value
+	if mutableParams := req.GetMutableParameters(); len(mutableParams) > 0 {
+		if err := validateVACParams(mutableParams); err != nil {
+			logger.Error("getVolumeParameters", zap.NamedError("invalidParameter", err))
+			return volume, err
+		}
+		for key, value := range mutableParams {
+			logger.Info("VolumeAttributesClass parameter detected", zap.String("key", key), zap.String("value", value))
+			allParameters[key] = value
+		}
 	}
 
 	// Sort keys for deterministic processing order
@@ -522,6 +528,23 @@ func createCSISnapshotResponse(snapshot provider.Snapshot) *csi.CreateSnapshotRe
 			ReadyToUse:     snapshot.ReadyToUse,
 		},
 	}
+}
+
+// validateVACParams ensures a VolumeAttributesClass contains only the parameters listed in SupportedVACParams
+func validateVACParams(params map[string]string) error {
+	for key := range params {
+		supported := false
+		for _, allowed := range SupportedVACParams {
+			if key == allowed {
+				supported = true
+				break
+			}
+		}
+		if !supported {
+			return fmt.Errorf("parameter '%s' is not supported in VolumeAttributesClass; supported parameters are: %s", key, strings.Join(SupportedVACParams, ", "))
+		}
+	}
+	return nil
 }
 
 func createControllerPublishVolumeResponse(volumeAttachmentResponse provider.VolumeAttachmentResponse, extraPublishInfo map[string]string) *csi.ControllerPublishVolumeResponse {

@@ -740,6 +740,9 @@ func (csiCS *CSIControllerServer) ControllerModifyVolume(ctx context.Context, re
 	}
 
 	params := req.GetMutableParameters()
+	if err := validateVACParams(params); err != nil {
+		return nil, commonError.GetCSIError(ctxLogger, commonError.InvalidParameters, requestID, err)
+	}
 	var iops int64
 	var bandwidth int32
 

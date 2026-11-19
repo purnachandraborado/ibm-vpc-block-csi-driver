@@ -141,3 +141,6 @@ var SupportedFS = []string{"ext2", "ext3", "ext4", "xfs"}
 
 // SupportedProfile the supported profile names
 var SupportedProfile = []string{"custom", "general-purpose", "5iops-tier", "10iops-tier", "sdp"}
+
+// SupportedVACParams the parameters allowed in a VolumeAttributesClass
+var SupportedVACParams = []string{IOPS, Throughput, Bandwidth}
