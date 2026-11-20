@@ -216,8 +216,8 @@ func TestGetVolumeParameters(t *testing.T) {
 		{
 			testCaseName: "Valid create volume with VAC mutable parameters",
 			request: &csi.CreateVolumeRequest{
-				Name:          volumeName,
-				CapacityRange: &csi.CapacityRange{RequiredBytes: 11811160064, LimitBytes: utils.MinimumVolumeSizeInBytes + utils.MinimumVolumeSizeInBytes},
+				Name:               volumeName,
+				CapacityRange:      &csi.CapacityRange{RequiredBytes: 11811160064, LimitBytes: utils.MinimumVolumeSizeInBytes + utils.MinimumVolumeSizeInBytes},
 				VolumeCapabilities: []*csi.VolumeCapability{{AccessMode: &csi.VolumeCapability_AccessMode{Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER}}},
 				Parameters: map[string]string{
 					Profile:       "sdp",
@@ -249,8 +249,8 @@ func TestGetVolumeParameters(t *testing.T) {
 		{
 			testCaseName: "Create volume with invalid VAC mutable parameter fails",
 			request: &csi.CreateVolumeRequest{
-				Name:          volumeName,
-				CapacityRange: &csi.CapacityRange{RequiredBytes: 11811160064, LimitBytes: utils.MinimumVolumeSizeInBytes + utils.MinimumVolumeSizeInBytes},
+				Name:               volumeName,
+				CapacityRange:      &csi.CapacityRange{RequiredBytes: 11811160064, LimitBytes: utils.MinimumVolumeSizeInBytes + utils.MinimumVolumeSizeInBytes},
 				VolumeCapabilities: []*csi.VolumeCapability{{AccessMode: &csi.VolumeCapability_AccessMode{Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER}}},
 				Parameters: map[string]string{
 					Profile: "sdp",
