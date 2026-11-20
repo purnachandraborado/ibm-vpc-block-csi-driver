@@ -1009,3 +1009,91 @@ func TestGetAccountID(t *testing.T) {
 		})
 	}
 }
+
+func TestGetModifyVolumeParameters(t *testing.T) {
+	testCases := []struct {
+		name      string
+		params    map[string]string
+		expReq    *provider.ModifyVolumeRequest
+		expErrMsg string
+	}{
+		{
+			name:   "iops only",
+			params: map[string]string{IOPS: "3000"},
+			expReq: &provider.ModifyVolumeRequest{VolumeID: "vol-1", VolumePerformance: provider.VolumePerformance{Iops: 3000}},
+		},
+		{
+			name:   "throughput only",
+			params: map[string]string{Throughput: "2000"},
+			expReq: &provider.ModifyVolumeRequest{VolumeID: "vol-1", VolumePerformance: provider.VolumePerformance{Bandwidth: 2000}},
+		},
+		{
+			name:   "bandwidth alias",
+			params: map[string]string{Bandwidth: "2000"},
+			expReq: &provider.ModifyVolumeRequest{VolumeID: "vol-1", VolumePerformance: provider.VolumePerformance{Bandwidth: 2000}},
+		},
+		{
+			name:   "throughput wins over bandwidth alias",
+			params: map[string]string{Throughput: "2000", Bandwidth: "3000"},
+			expReq: &provider.ModifyVolumeRequest{VolumeID: "vol-1", VolumePerformance: provider.VolumePerformance{Bandwidth: 2000}},
+		},
+		{
+			name:   "iops and throughput with whitespace",
+			params: map[string]string{IOPS: " 4000 ", Throughput: " 2500 "},
+			expReq: &provider.ModifyVolumeRequest{VolumeID: "vol-1", VolumePerformance: provider.VolumePerformance{Iops: 4000, Bandwidth: 2500}},
+		},
+		{
+			name:      "unsupported parameter",
+			params:    map[string]string{"unknown": "1"},
+			expErrMsg: "unknown",
+		},
+		{
+			name:      "non-numeric iops",
+			params:    map[string]string{IOPS: "abc"},
+			expErrMsg: "invalid value",
+		},
+		{
+			name:      "non-numeric throughput",
+			params:    map[string]string{Throughput: "abc"},
+			expErrMsg: "invalid value",
+		},
+		{
+			name:      "zero iops",
+			params:    map[string]string{IOPS: "0"},
+			expErrMsg: "must be greater than 0",
+		},
+		{
+			name:      "negative throughput",
+			params:    map[string]string{Throughput: "-5"},
+			expErrMsg: "must be greater than 0",
+		},
+		{
+			name:      "throughput overflows int32",
+			params:    map[string]string{Throughput: "99999999999"},
+			expErrMsg: "invalid value",
+		},
+		{
+			name:      "empty values",
+			params:    map[string]string{IOPS: "  ", Throughput: ""},
+			expErrMsg: "must contain at least parameter",
+		},
+	}
+
+	logger, teardown := cloudProvider.GetTestLogger(t)
+	defer teardown()
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			req, err := getModifyVolumeParameters(logger, "vol-1", tc.params)
+			if tc.expErrMsg != "" {
+				assert.Nil(t, req)
+				if assert.Error(t, err) {
+					assert.Contains(t, err.Error(), tc.expErrMsg)
+				}
+				return
+			}
+			assert.NoError(t, err)
+			assert.Equal(t, tc.expReq, req)
+		})
+	}
+}

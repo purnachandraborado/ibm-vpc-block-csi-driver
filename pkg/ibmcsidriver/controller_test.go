@@ -1652,6 +1652,10 @@ func TestControllerModifyVolume(t *testing.T) {
 		libVolumeErr      error
 		libUpdateErr      error
 		expErrCode        codes.Code
+		// expModifyReq is the request ModifyVolume is expected to receive.
+		expModifyReq *provider.ModifyVolumeRequest
+		// expNoModifyCall asserts that ModifyVolume is never called.
+		expNoModifyCall bool
 	}{
 		{
 			name:       "Empty VolumeID returns InvalidArgument error",
@@ -1737,6 +1741,10 @@ func TestControllerModifyVolume(t *testing.T) {
 				},
 			},
 			expErrCode: codes.OK,
+			expModifyReq: &provider.ModifyVolumeRequest{
+				VolumeID:          "test-vol-id",
+				VolumePerformance: provider.VolumePerformance{Iops: 3000},
+			},
 		},
 		{
 			name: "Valid throughput/bandwidth modification succeeds",
@@ -1751,9 +1759,13 @@ func TestControllerModifyVolume(t *testing.T) {
 				},
 			},
 			expErrCode: codes.OK,
+			expModifyReq: &provider.ModifyVolumeRequest{
+				VolumeID:          "test-vol-id",
+				VolumePerformance: provider.VolumePerformance{Bandwidth: 500},
+			},
 		},
 		{
-			name: "Backend UpdateVolume error returns InvalidArgument error",
+			name: "Backend ModifyVolume error returns InvalidArgument error",
 			req: &csi.ControllerModifyVolumeRequest{
 				VolumeId:          "test-vol-id",
 				MutableParameters: map[string]string{IOPS: "3000"},
@@ -1857,9 +1869,9 @@ func TestControllerModifyVolume(t *testing.T) {
 			},
 			expErrCode: codes.OK,
 		},
-		// VAC with empty mutable parameters — no-op, driver skips API call
+		// VAC with empty mutable parameters — rejected, driver does not call ModifyVolume
 		{
-			name: "VAC empty mutable parameters: no API call made, returns OK",
+			name: "VAC empty mutable parameters: returns InvalidArgument and no API call made",
 			req: &csi.ControllerModifyVolumeRequest{
 				VolumeId:          "r134-vol-custom-001",
 				MutableParameters: map[string]string{},
@@ -1870,7 +1882,8 @@ func TestControllerModifyVolume(t *testing.T) {
 					Profile: &provider.Profile{Name: CustomProfile},
 				},
 			},
-			expErrCode: codes.OK,
+			expErrCode:      codes.InvalidArgument,
+			expNoModifyCall: true,
 		},
 		// VAC tier mismatch — iops VAC applied to 5iops-tier volume: VPC API rejects
 		// because 5iops-tier has fixed IOPS and does not accept explicit iops updates.
@@ -1969,7 +1982,7 @@ func TestControllerModifyVolume(t *testing.T) {
 			assert.True(t, ok)
 			fakeStructSession.GetVolumeReturns(tc.libVolumeResponse, tc.libVolumeErr)
 			if tc.libUpdateErr != nil {
-				fakeStructSession.UpdateVolumeReturns(tc.libUpdateErr)
+				fakeStructSession.ModifyVolumeReturns(nil, tc.libUpdateErr)
 			}
 
 			_, err = icDriver.cs.ControllerModifyVolume(context.Background(), tc.req)
@@ -1982,6 +1995,14 @@ func TestControllerModifyVolume(t *testing.T) {
 				}
 			} else {
 				assert.Nil(t, err)
+			}
+
+			if tc.expNoModifyCall {
+				assert.Equal(t, 0, fakeStructSession.ModifyVolumeCallCount())
+			}
+			if tc.expModifyReq != nil {
+				assert.Equal(t, 1, fakeStructSession.ModifyVolumeCallCount())
+				assert.Equal(t, *tc.expModifyReq, fakeStructSession.ModifyVolumeArgsForCall(0))
 			}
 		})
 	}

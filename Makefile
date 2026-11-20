@@ -119,6 +119,7 @@ build-systemutil:
 .PHONY: test-sanity
 test-sanity: deps fmt
 	SANITY_PARAMS_FILE=./csi_sanity_params.yaml go test -timeout 160s ./tests/sanity -run ^TestSanity$$ -v
+	SANITY_PARAMS_FILE=./csi_sanity_params.yaml SANITY_MUTABLE_PARAMS_FILE=./csi_sanity_mutable_params.yaml go test -timeout 160s ./tests/sanity -run ^TestSanity$$ -v
 
 .PHONY: clean
 clean:

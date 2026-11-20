@@ -118,7 +118,13 @@ func TestSanity(t *testing.T) {
 	config.TestVolumeParametersFile = os.Getenv("SANITY_PARAMS_FILE")
 	config.TestVolumeParameters = map[string]string{"profile": "custom", "zone": "testzone"}
 	config.TestVolumeSize = 10737418240 // i.e 10 GB
-	config.TestVolumeMutableParameters = map[string]string{"iops": "3000"}
+	// VolumeAttributesClass parameters can be selected with SANITY_MUTABLE_PARAMS_FILE.
+	// Defaults to iops 3000.
+	if mutableParamsFile := os.Getenv("SANITY_MUTABLE_PARAMS_FILE"); mutableParamsFile != "" {
+		config.TestVolumeMutableParametersFile = mutableParamsFile
+	} else {
+		config.TestVolumeMutableParameters = map[string]string{"iops": "3000"}
+	}
 	config.CreateTargetDir = func(targetPath string) (string, error) {
 		targetPath = path.Join(TempDir, targetPath)
 		return targetPath, createTargetDir(targetPath)

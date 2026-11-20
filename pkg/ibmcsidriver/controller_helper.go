@@ -547,6 +547,63 @@ func validateVACParams(params map[string]string) error {
 	return nil
 }
 
+// getModifyVolumeParameters validates the VolumeAttributesClass mutable parameters of a
+// ControllerModifyVolume request and builds the provider ModifyVolumeRequest.
+//
+// The volume profile is not checked here. Iops and throughput are passed to VPC as they are, and
+// VPC rejects what the profile does not allow (for example iops on a tiered profile, or throughput
+// on a custom profile). The skipErrorCodes of the provider make that rejection fail without retry.
+// "throughput" is preferred over its alias "bandwidth" when both are given.
+func getModifyVolumeParameters(logger *zap.Logger, volumeID string, params map[string]string) (*provider.ModifyVolumeRequest, error) {
+	// Reject parameters that are not supported at all (only 'iops', 'throughput' and 'bandwidth').
+	if err := validateVACParams(params); err != nil {
+		logger.Error("getModifyVolumeParameters: unsupported parameter", zap.String("volumeID", volumeID), zap.Error(err))
+		return nil, fmt.Errorf("volume %s: %w", volumeID, err)
+	}
+
+	performance := provider.VolumePerformance{}
+	hasParams := false
+
+	if val, ok := params[IOPS]; ok && strings.TrimSpace(val) != "" {
+		parsed, err := strconv.ParseInt(strings.TrimSpace(val), 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("invalid value %q for parameter '%s': %w", val, IOPS, err)
+		}
+		if parsed <= 0 {
+			return nil, fmt.Errorf("invalid value %q for parameter '%s': must be greater than 0", val, IOPS)
+		}
+		performance.Iops = parsed
+		hasParams = true
+	}
+
+	throughputKey := Throughput
+	val, ok := params[Throughput]
+	if !ok {
+		throughputKey = Bandwidth
+		val, ok = params[Bandwidth]
+	}
+	if ok && strings.TrimSpace(val) != "" {
+		parsed, err := strconv.ParseInt(strings.TrimSpace(val), 10, 32)
+		if err != nil {
+			return nil, fmt.Errorf("invalid value %q for parameter '%s': %w", val, throughputKey, err)
+		}
+		if parsed <= 0 {
+			return nil, fmt.Errorf("invalid value %q for parameter '%s': must be greater than 0", val, throughputKey)
+		}
+		performance.Bandwidth = int32(parsed)
+		hasParams = true
+	}
+
+	if !hasParams {
+		return nil, fmt.Errorf("VolumeAttributesClass must contain at least parameter '%s' or '%s' for volume %s", IOPS, Throughput, volumeID)
+	}
+
+	return &provider.ModifyVolumeRequest{
+		VolumeID:          volumeID,
+		VolumePerformance: performance,
+	}, nil
+}
+
 func createControllerPublishVolumeResponse(volumeAttachmentResponse provider.VolumeAttachmentResponse, extraPublishInfo map[string]string) *csi.ControllerPublishVolumeResponse {
 	publishContext := map[string]string{
 		PublishInfoVolumeID:   volumeAttachmentResponse.VolumeID,

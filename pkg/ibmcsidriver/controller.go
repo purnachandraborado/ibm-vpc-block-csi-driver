@@ -20,7 +20,6 @@ package ibmcsidriver
 import (
 	"context"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -726,6 +725,13 @@ func (csiCS *CSIControllerServer) ControllerModifyVolume(ctx context.Context, re
 		return nil, commonError.GetCSIError(ctxLogger, commonError.EmptyVolumeID, requestID, nil)
 	}
 
+	// Iops and throughput from the VolumeAttributesClass are passed as they are and VPC rejects
+	// what the volume profile does not allow. Parse them before any call to the provider.
+	modifyReq, err := getModifyVolumeParameters(ctxLogger, volumeID, req.GetMutableParameters())
+	if err != nil {
+		return nil, commonError.GetCSIError(ctxLogger, commonError.InvalidParameters, requestID, err)
+	}
+
 	session, err := csiCS.CSIProvider.GetProviderSession(ctx, ctxLogger)
 	if err != nil {
 		return nil, commonError.GetCSIError(ctxLogger, commonError.FailedPrecondition, requestID, err)
@@ -739,72 +745,13 @@ func (csiCS *CSIControllerServer) ControllerModifyVolume(ctx context.Context, re
 		return nil, commonError.GetCSIError(ctxLogger, commonError.InternalError, requestID, err)
 	}
 
-	params := req.GetMutableParameters()
-	if err := validateVACParams(params); err != nil {
-		return nil, commonError.GetCSIError(ctxLogger, commonError.InvalidParameters, requestID, err)
-	}
-	var iops int64
-	var bandwidth int32
-
-	volumeProfile := ""
-	if volDetail.Profile != nil {
-		volumeProfile = strings.ToLower(volDetail.Profile.Name)
-	}
-	ctxLogger.Info("ControllerModifyVolume: resolved volume profile",
-		zap.String("profile", volumeProfile))
-
-	if val, ok := params[Throughput]; ok {
-		parsed, parseErr := strconv.ParseInt(val, 10, 32)
-		if parseErr != nil {
-			return nil, commonError.GetCSIError(ctxLogger, commonError.InvalidParameters, requestID, parseErr, Throughput, val)
-		}
-		bandwidth = int32(parsed)
-	} else if val, ok := params[Bandwidth]; ok {
-		parsed, parseErr := strconv.ParseInt(val, 10, 32)
-		if parseErr != nil {
-			return nil, commonError.GetCSIError(ctxLogger, commonError.InvalidParameters, requestID, parseErr, Bandwidth, val)
-		}
-		bandwidth = int32(parsed)
-	}
-
-	if val, ok := params[IOPS]; ok {
-		parsed, parseErr := strconv.ParseInt(val, 10, 64)
-		if parseErr != nil {
-			return nil, commonError.GetCSIError(ctxLogger, commonError.InvalidParameters, requestID, parseErr, IOPS, val)
-		}
-		iops = parsed
-	}
-
-	// Return InvalidArgument when mutable parameters were supplied but none are recognised.
-	// An empty params map means the caller wants a no-op, which is fine.
-	if iops == 0 && bandwidth == 0 {
-		if len(params) > 0 {
-			return nil, commonError.GetCSIError(ctxLogger, commonError.InvalidParameters, requestID, nil,
-				"none of the supplied mutable parameters are supported by this volume")
-		}
-		ctxLogger.Info("ControllerModifyVolume: no parameters supplied, skipping API call",
-			zap.String("VolumeID", requestedVolume.VolumeID))
-		return &csi.ControllerModifyVolumeResponse{}, nil
-	}
-
-	modifyVolume := provider.Volume{
-		VolumeID: requestedVolume.VolumeID,
-		VPCVolume: provider.VPCVolume{
-			Bandwidth: bandwidth,
-		},
-	}
-	if iops > 0 {
-		iopsStr := strconv.FormatInt(iops, 10)
-		modifyVolume.Iops = &iopsStr
-	}
-
 	ctxLogger.Info("ModifyVolume Request",
-		zap.String("VolumeID", modifyVolume.VolumeID),
-		zap.Int64("IOPS", iops),
-		zap.Int32("Bandwidth", bandwidth),
+		zap.String("VolumeID", modifyReq.VolumeID),
+		zap.Int64("IOPS", modifyReq.Iops),
+		zap.Int32("Bandwidth", modifyReq.Bandwidth),
 	)
 
-	err = session.UpdateVolume(modifyVolume)
+	_, err = session.ModifyVolume(*modifyReq)
 	if err != nil {
 		return nil, commonError.GetCSIBackendError(ctxLogger, requestID, err)
 	}
