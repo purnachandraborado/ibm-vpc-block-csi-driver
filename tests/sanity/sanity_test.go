@@ -80,10 +80,6 @@ func TestSanity(t *testing.T) {
 	}
 	skipTests := strings.Join([]string{
 		"NodeExpandVolume.*should work if node-expand is called after node-publish",
-		"Node Service.*should work",
-		"Node Service.*should be idempotent",
-		"Node Service NodeGetVolumeStats.*should fail when volume does not exist on the specified path",
-		"Node Service NodeExpandVolume.*should fail when volume is not found",
 	}, "|")
 
 	// Create a fake CSI driver
@@ -380,6 +376,27 @@ func (c *fakeProviderSession) ExpandVolume(expandVolumeRequest provider.ExpandVo
 		}
 	}
 	return -1, errors.New("no volume found")
+}
+
+// ModifyVolume modifies volume performance
+func (c *fakeProviderSession) ModifyVolume(modifyVolumeRequest provider.ModifyVolumeRequest) (*provider.ModifyVolumeResponse, error) {
+	if len(modifyVolumeRequest.VolumeID) == 0 {
+		return nil, errors.New("no Volume id passed")
+	}
+	for _, f := range c.volumes {
+		if f.VolumeID == modifyVolumeRequest.VolumeID {
+			return &provider.ModifyVolumeResponse{
+				VolumeID:          modifyVolumeRequest.VolumeID,
+				VolumePerformance: modifyVolumeRequest.VolumePerformance,
+			}, nil
+		}
+	}
+	errorMsg := providerError.Message{
+		Code:        "StorageFindFailedWithVolumeID",
+		Description: "Volume not found by volume ID",
+		Type:        providerError.EntityNotFound,
+	}
+	return nil, errorMsg
 }
 
 // Get the volume by using ID  //

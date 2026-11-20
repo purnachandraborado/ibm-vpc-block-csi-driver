@@ -5,4 +5,4 @@ metadata:
 driverName: vpc.block.csi.ibm.io
 parameters:
   iops: "4000"
-  throughput: "5000"
+  throughput: "2000"

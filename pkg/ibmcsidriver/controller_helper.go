@@ -283,6 +283,11 @@ func getVolumeParameters(logger *zap.Logger, req *csi.CreateVolumeRequest, confi
 		volume.Iops = nil
 	}
 
+	// Clear Throughput (bandwidth) for non-SDP profiles
+	if volume.Profile != nil && volume.Profile.Name != SDPProfile {
+		volume.Bandwidth = 0
+	}
+
 	// Set zone from topology if not specified
 	if len(strings.TrimSpace(volume.Az)) == 0 {
 		zones, err := pickTargetTopologyParams(req.GetAccessibilityRequirements())
@@ -553,9 +558,8 @@ func validateVACParams(params map[string]string) error {
 // The volume profile is not checked here. Iops and throughput are passed to VPC as they are, and
 // VPC rejects what the profile does not allow (for example iops on a tiered profile, or throughput
 // on a custom profile). The skipErrorCodes of the provider make that rejection fail without retry.
-// "throughput" is preferred over its alias "bandwidth" when both are given.
 func getModifyVolumeParameters(logger *zap.Logger, volumeID string, params map[string]string) (*provider.ModifyVolumeRequest, error) {
-	// Reject parameters that are not supported at all (only 'iops', 'throughput' and 'bandwidth').
+	// Reject parameters that are not supported at all (only 'iops' and 'throughput').
 	if err := validateVACParams(params); err != nil {
 		logger.Error("getModifyVolumeParameters: unsupported parameter", zap.String("volumeID", volumeID), zap.Error(err))
 		return nil, fmt.Errorf("volume %s: %w", volumeID, err)
@@ -576,19 +580,13 @@ func getModifyVolumeParameters(logger *zap.Logger, volumeID string, params map[s
 		hasParams = true
 	}
 
-	throughputKey := Throughput
-	val, ok := params[Throughput]
-	if !ok {
-		throughputKey = Bandwidth
-		val, ok = params[Bandwidth]
-	}
-	if ok && strings.TrimSpace(val) != "" {
+	if val, ok := params[Throughput]; ok && strings.TrimSpace(val) != "" {
 		parsed, err := strconv.ParseInt(strings.TrimSpace(val), 10, 32)
 		if err != nil {
-			return nil, fmt.Errorf("invalid value %q for parameter '%s': %w", val, throughputKey, err)
+			return nil, fmt.Errorf("invalid value %q for parameter '%s': %w", val, Throughput, err)
 		}
 		if parsed <= 0 {
-			return nil, fmt.Errorf("invalid value %q for parameter '%s': must be greater than 0", val, throughputKey)
+			return nil, fmt.Errorf("invalid value %q for parameter '%s': must be greater than 0", val, Throughput)
 		}
 		performance.Bandwidth = int32(parsed)
 		hasParams = true

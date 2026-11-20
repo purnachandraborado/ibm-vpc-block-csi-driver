@@ -19,6 +19,7 @@ package ibmcsidriver
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/IBM/ibm-csi-common/pkg/utils"
@@ -211,6 +212,56 @@ func TestGetVolumeParameters(t *testing.T) {
 			},
 			expectedStatus: true,
 			expectedError:  nil,
+		},
+		{
+			testCaseName: "Valid create volume with VAC mutable parameters",
+			request: &csi.CreateVolumeRequest{
+				Name:          volumeName,
+				CapacityRange: &csi.CapacityRange{RequiredBytes: 11811160064, LimitBytes: utils.MinimumVolumeSizeInBytes + utils.MinimumVolumeSizeInBytes},
+				VolumeCapabilities: []*csi.VolumeCapability{{AccessMode: &csi.VolumeCapability_AccessMode{Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER}}},
+				Parameters: map[string]string{
+					Profile:       "sdp",
+					Zone:          "testzone",
+					Region:        "us-south-test",
+					ResourceGroup: "myresourcegroups",
+				},
+				MutableParameters: map[string]string{
+					IOPS:       "4000",
+					Throughput: "2000",
+				},
+			},
+			expectedVolume: &provider.Volume{
+				Name:     &volumeName,
+				Capacity: &volumeSize,
+				VPCVolume: provider.VPCVolume{
+					Tags:          []string{createdByIBM},
+					Profile:       &provider.Profile{Name: "sdp"},
+					ResourceGroup: &provider.ResourceGroup{ID: "myresourcegroups"},
+					Bandwidth:     2000,
+				},
+				Region: "us-south-test",
+				Iops:   func() *string { s := "4000"; return &s }(),
+				Az:     "testzone",
+			},
+			expectedStatus: true,
+			expectedError:  nil,
+		},
+		{
+			testCaseName: "Create volume with invalid VAC mutable parameter fails",
+			request: &csi.CreateVolumeRequest{
+				Name:          volumeName,
+				CapacityRange: &csi.CapacityRange{RequiredBytes: 11811160064, LimitBytes: utils.MinimumVolumeSizeInBytes + utils.MinimumVolumeSizeInBytes},
+				VolumeCapabilities: []*csi.VolumeCapability{{AccessMode: &csi.VolumeCapability_AccessMode{Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER}}},
+				Parameters: map[string]string{
+					Profile: "sdp",
+				},
+				MutableParameters: map[string]string{
+					"invalid-param": "value",
+				},
+			},
+			expectedVolume: &provider.Volume{},
+			expectedStatus: true,
+			expectedError:  fmt.Errorf("parameter 'invalid-param' is not supported in VolumeAttributesClass; supported parameters are: %s", strings.Join(SupportedVACParams, ", ")),
 		},
 		{
 			testCaseName:   "Wrong profile name",
@@ -1028,14 +1079,9 @@ func TestGetModifyVolumeParameters(t *testing.T) {
 			expReq: &provider.ModifyVolumeRequest{VolumeID: "vol-1", VolumePerformance: provider.VolumePerformance{Bandwidth: 2000}},
 		},
 		{
-			name:   "bandwidth alias",
-			params: map[string]string{Bandwidth: "2000"},
-			expReq: &provider.ModifyVolumeRequest{VolumeID: "vol-1", VolumePerformance: provider.VolumePerformance{Bandwidth: 2000}},
-		},
-		{
-			name:   "throughput wins over bandwidth alias",
-			params: map[string]string{Throughput: "2000", Bandwidth: "3000"},
-			expReq: &provider.ModifyVolumeRequest{VolumeID: "vol-1", VolumePerformance: provider.VolumePerformance{Bandwidth: 2000}},
+			name:      "bandwidth rejected as unsupported parameter",
+			params:    map[string]string{Bandwidth: "2000"},
+			expErrMsg: "bandwidth",
 		},
 		{
 			name:   "iops and throughput with whitespace",

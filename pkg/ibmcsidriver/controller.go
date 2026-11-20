@@ -737,14 +737,6 @@ func (csiCS *CSIControllerServer) ControllerModifyVolume(ctx context.Context, re
 		return nil, commonError.GetCSIError(ctxLogger, commonError.FailedPrecondition, requestID, err)
 	}
 
-	requestedVolume := &provider.Volume{VolumeID: volumeID}
-	volDetail, err := checkIfVolumeExists(session, *requestedVolume, ctxLogger)
-	if volDetail == nil && err == nil {
-		return nil, commonError.GetCSIError(ctxLogger, commonError.ObjectNotFound, requestID, nil, volumeID)
-	} else if err != nil {
-		return nil, commonError.GetCSIError(ctxLogger, commonError.InternalError, requestID, err)
-	}
-
 	ctxLogger.Info("ModifyVolume Request",
 		zap.String("VolumeID", modifyReq.VolumeID),
 		zap.Int64("IOPS", modifyReq.Iops),
@@ -753,6 +745,9 @@ func (csiCS *CSIControllerServer) ControllerModifyVolume(ctx context.Context, re
 
 	_, err = session.ModifyVolume(*modifyReq)
 	if err != nil {
+		if providerError.GetErrorType(err) == providerError.EntityNotFound {
+			return nil, commonError.GetCSIError(ctxLogger, commonError.ObjectNotFound, requestID, err, volumeID)
+		}
 		return nil, commonError.GetCSIBackendError(ctxLogger, requestID, err)
 	}
 

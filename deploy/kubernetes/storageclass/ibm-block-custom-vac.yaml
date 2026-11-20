@@ -1,7 +1,7 @@
 apiVersion: storage.k8s.io/v1
 kind: VolumeAttributesClass
 metadata:
-  name: ibm-block-tier-vac
+  name: ibm-block-custom-vac
 driverName: vpc.block.csi.ibm.io
 parameters:
-  iops: "6000"
+  iops: "3000"

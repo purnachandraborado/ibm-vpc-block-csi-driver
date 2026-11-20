@@ -1663,28 +1663,13 @@ func TestControllerModifyVolume(t *testing.T) {
 			expErrCode: codes.InvalidArgument,
 		},
 		{
-			name: "Volume not found returns NotFound error",
-			req: &csi.ControllerModifyVolumeRequest{
-				VolumeId:          "test-vol-id",
-				MutableParameters: map[string]string{IOPS: "3000"},
-			},
-			libVolumeResponse: nil,
-			libVolumeErr:      nil,
-			expErrCode:        codes.NotFound,
-		},
-		{
 			name: "Non-numeric IOPS param returns InvalidArgument",
 			req: &csi.ControllerModifyVolumeRequest{
 				VolumeId:          "test-vol-id",
 				MutableParameters: map[string]string{IOPS: "not-a-number"},
 			},
-			libVolumeResponse: &provider.Volume{
-				VolumeID: "test-vol-id",
-				VPCVolume: provider.VPCVolume{
-					Profile: &provider.Profile{Name: CustomProfile},
-				},
-			},
-			expErrCode: codes.InvalidArgument,
+			expErrCode:      codes.InvalidArgument,
+			expNoModifyCall: true,
 		},
 		{
 			name: "Non-numeric throughput param returns InvalidArgument",
@@ -1692,27 +1677,17 @@ func TestControllerModifyVolume(t *testing.T) {
 				VolumeId:          "test-vol-id",
 				MutableParameters: map[string]string{Throughput: "not-a-number"},
 			},
-			libVolumeResponse: &provider.Volume{
-				VolumeID: "test-vol-id",
-				VPCVolume: provider.VPCVolume{
-					Profile: &provider.Profile{Name: "general-purpose"},
-				},
-			},
-			expErrCode: codes.InvalidArgument,
+			expErrCode:      codes.InvalidArgument,
+			expNoModifyCall: true,
 		},
 		{
-			name: "Non-numeric bandwidth param returns InvalidArgument",
+			name: "Bandwidth param rejected as invalid argument",
 			req: &csi.ControllerModifyVolumeRequest{
 				VolumeId:          "test-vol-id",
-				MutableParameters: map[string]string{Bandwidth: "not-a-number"},
+				MutableParameters: map[string]string{Bandwidth: "2000"},
 			},
-			libVolumeResponse: &provider.Volume{
-				VolumeID: "test-vol-id",
-				VPCVolume: provider.VPCVolume{
-					Profile: &provider.Profile{Name: "general-purpose"},
-				},
-			},
-			expErrCode: codes.InvalidArgument,
+			expErrCode:      codes.InvalidArgument,
+			expNoModifyCall: true,
 		},
 		{
 			name: "Unrecognized params returns InvalidArgument",
