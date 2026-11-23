@@ -131,9 +131,6 @@ const (
 
 	// Throughput ...
 	Throughput = "throughput"
-
-	// Bandwidth ...
-	Bandwidth = "bandwidth"
 )
 
 // SupportedFS the supported FS types

@@ -1080,7 +1080,7 @@ func TestGetModifyVolumeParameters(t *testing.T) {
 		},
 		{
 			name:      "bandwidth rejected as unsupported parameter",
-			params:    map[string]string{Bandwidth: "2000"},
+			params:    map[string]string{"bandwidth": "2000"},
 			expErrMsg: "bandwidth",
 		},
 		{

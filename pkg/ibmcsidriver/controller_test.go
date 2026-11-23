@@ -1684,7 +1684,7 @@ func TestControllerModifyVolume(t *testing.T) {
 			name: "Bandwidth param rejected as invalid argument",
 			req: &csi.ControllerModifyVolumeRequest{
 				VolumeId:          "test-vol-id",
-				MutableParameters: map[string]string{Bandwidth: "2000"},
+				MutableParameters: map[string]string{"bandwidth": "2000"},
 			},
 			expErrCode:      codes.InvalidArgument,
 			expNoModifyCall: true,
