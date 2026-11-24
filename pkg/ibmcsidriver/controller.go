@@ -745,9 +745,6 @@ func (csiCS *CSIControllerServer) ControllerModifyVolume(ctx context.Context, re
 
 	_, err = session.ModifyVolume(*modifyReq)
 	if err != nil {
-		if providerError.GetErrorType(err) == providerError.EntityNotFound {
-			return nil, commonError.GetCSIError(ctxLogger, commonError.ObjectNotFound, requestID, err, volumeID)
-		}
 		return nil, commonError.GetCSIBackendError(ctxLogger, requestID, err)
 	}
 
