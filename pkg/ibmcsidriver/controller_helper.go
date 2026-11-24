@@ -229,6 +229,13 @@ func getVolumeParameters(logger *zap.Logger, req *csi.CreateVolumeRequest, confi
 		return volume, err
 	}
 
+	// VolumeAttributesClass is supported only for sdp profile.
+	if len(req.GetMutableParameters()) > 0 && volume.Profile.Name != SDPProfile {
+		err := fmt.Errorf("VolumeAttributesClass is supported only for %s profile, volume profile is %s; please remove the volumeAttributesClassName from the PVC", SDPProfile, volume.Profile.Name)
+		logger.Error("getVolumeParameters", zap.NamedError("invalidParameter", err))
+		return volume, err
+	}
+
 	// Get requested capacity
 	capacityRange := req.GetCapacityRange()
 	capBytes, err := getRequestedCapacity(capacityRange, volume.Profile.Name)
@@ -278,14 +285,20 @@ func getVolumeParameters(logger *zap.Logger, req *csi.CreateVolumeRequest, confi
 		break
 	}
 
-	// Clear IOPS for non-custom/SDP profiles
-	if volume.Profile != nil && volume.Profile.Name != CustomProfile && volume.Profile.Name != SDPProfile {
+	// iops is a valid attribute only for custom and sdp profiles.
+	if volume.Profile.Name != CustomProfile && volume.Profile.Name != SDPProfile {
+		if volume.Iops != nil && len(strings.TrimSpace(*volume.Iops)) > 0 {
+			// Ignored, not rejected, so that existing storage classes keep working.
+			logger.Warn("Ignoring iops storage class parameter, it is not supported for the profile", zap.String("profile", volume.Profile.Name))
+		}
 		volume.Iops = nil
 	}
 
-	// Clear Throughput (bandwidth) for non-SDP profiles
-	if volume.Profile != nil && volume.Profile.Name != SDPProfile {
-		volume.Bandwidth = 0
+	// throughput is a valid attribute only for sdp profile.
+	if volume.Profile.Name != SDPProfile && volume.Bandwidth > 0 {
+		err = fmt.Errorf("throughput is not supported for %s profile; please remove the throughput parameter from the storage class", volume.Profile.Name)
+		logger.Error("getVolumeParameters", zap.NamedError("invalidParameter", err))
+		return volume, err
 	}
 
 	// Set zone from topology if not specified
