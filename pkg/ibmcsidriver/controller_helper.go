@@ -20,7 +20,6 @@ package ibmcsidriver
 import (
 	"fmt"
 	"os"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -120,16 +119,8 @@ func getVolumeParameters(logger *zap.Logger, req *csi.CreateVolumeRequest, confi
 		}
 	}
 
-	// Sort keys for deterministic processing order
-	allKeys := make([]string, 0, len(allParameters))
-	for key := range allParameters {
-		allKeys = append(allKeys, key)
-	}
-	sort.Strings(allKeys)
-
 	// Process all merged parameters
-	for _, key := range allKeys {
-		value := allParameters[key]
+	for key, value := range allParameters {
 		var err error
 		switch key {
 		case Profile:
