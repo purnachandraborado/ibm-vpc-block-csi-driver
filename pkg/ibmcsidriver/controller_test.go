@@ -1644,6 +1644,17 @@ func TestControllerGetVolume(t *testing.T) {
 	assert.Equal(t, codes.Unimplemented, status.Code(err))
 }
 
+func profileVolume(id, profile string) *provider.Volume {
+	return &provider.Volume{
+		VolumeID:  id,
+		VPCVolume: provider.VPCVolume{Profile: &provider.Profile{Name: profile}},
+	}
+}
+
+func sdpVolume(id string) *provider.Volume {
+	return profileVolume(id, SDPProfile)
+}
+
 func TestControllerModifyVolume(t *testing.T) {
 	testCases := []struct {
 		name              string
@@ -1668,8 +1679,9 @@ func TestControllerModifyVolume(t *testing.T) {
 				VolumeId:          "test-vol-id",
 				MutableParameters: map[string]string{IOPS: "not-a-number"},
 			},
-			expErrCode:      codes.InvalidArgument,
-			expNoModifyCall: true,
+			libVolumeResponse: sdpVolume("test-vol-id"),
+			expErrCode:        codes.InvalidArgument,
+			expNoModifyCall:   true,
 		},
 		{
 			name: "Non-numeric throughput param returns InvalidArgument",
@@ -1677,8 +1689,9 @@ func TestControllerModifyVolume(t *testing.T) {
 				VolumeId:          "test-vol-id",
 				MutableParameters: map[string]string{Throughput: "not-a-number"},
 			},
-			expErrCode:      codes.InvalidArgument,
-			expNoModifyCall: true,
+			libVolumeResponse: sdpVolume("test-vol-id"),
+			expErrCode:        codes.InvalidArgument,
+			expNoModifyCall:   true,
 		},
 		{
 			name: "Bandwidth param rejected as invalid argument",
@@ -1686,8 +1699,9 @@ func TestControllerModifyVolume(t *testing.T) {
 				VolumeId:          "test-vol-id",
 				MutableParameters: map[string]string{"bandwidth": "2000"},
 			},
-			expErrCode:      codes.InvalidArgument,
-			expNoModifyCall: true,
+			libVolumeResponse: sdpVolume("test-vol-id"),
+			expErrCode:        codes.InvalidArgument,
+			expNoModifyCall:   true,
 		},
 		{
 			name: "Unrecognized params returns InvalidArgument",
@@ -1695,45 +1709,31 @@ func TestControllerModifyVolume(t *testing.T) {
 				VolumeId:          "test-vol-id",
 				MutableParameters: map[string]string{"unknown-key": "value"},
 			},
-			libVolumeResponse: &provider.Volume{
-				VolumeID: "test-vol-id",
-				VPCVolume: provider.VPCVolume{
-					Profile: &provider.Profile{Name: CustomProfile},
-				},
-			},
-			expErrCode: codes.InvalidArgument,
+			libVolumeResponse: sdpVolume("test-vol-id"),
+			expErrCode:        codes.InvalidArgument,
+			expNoModifyCall:   true,
 		},
 		{
-			name: "Valid IOPS modification succeeds",
+			name: "Valid IOPS modification on sdp succeeds",
 			req: &csi.ControllerModifyVolumeRequest{
 				VolumeId:          "test-vol-id",
 				MutableParameters: map[string]string{IOPS: "3000"},
 			},
-			libVolumeResponse: &provider.Volume{
-				VolumeID: "test-vol-id",
-				VPCVolume: provider.VPCVolume{
-					Profile: &provider.Profile{Name: CustomProfile},
-				},
-			},
-			expErrCode: codes.OK,
+			libVolumeResponse: sdpVolume("test-vol-id"),
+			expErrCode:        codes.OK,
 			expModifyReq: &provider.ModifyVolumeRequest{
 				VolumeID:          "test-vol-id",
 				VolumePerformance: provider.VolumePerformance{Iops: 3000},
 			},
 		},
 		{
-			name: "Valid throughput/bandwidth modification succeeds",
+			name: "Valid throughput modification on sdp succeeds",
 			req: &csi.ControllerModifyVolumeRequest{
 				VolumeId:          "test-vol-id",
 				MutableParameters: map[string]string{Throughput: "500"},
 			},
-			libVolumeResponse: &provider.Volume{
-				VolumeID: "test-vol-id",
-				VPCVolume: provider.VPCVolume{
-					Profile: &provider.Profile{Name: "general-purpose"},
-				},
-			},
-			expErrCode: codes.OK,
+			libVolumeResponse: sdpVolume("test-vol-id"),
+			expErrCode:        codes.OK,
 			expModifyReq: &provider.ModifyVolumeRequest{
 				VolumeID:          "test-vol-id",
 				VolumePerformance: provider.VolumePerformance{Bandwidth: 500},
@@ -1745,202 +1745,185 @@ func TestControllerModifyVolume(t *testing.T) {
 				VolumeId:          "test-vol-id",
 				MutableParameters: map[string]string{IOPS: "3000"},
 			},
-			libVolumeResponse: &provider.Volume{
-				VolumeID: "test-vol-id",
-				VPCVolume: provider.VPCVolume{
-					Profile: &provider.Profile{Name: CustomProfile},
-				},
-			},
-			libUpdateErr: errors.New("backend error"),
-			expErrCode:   codes.InvalidArgument,
+			libVolumeResponse: sdpVolume("test-vol-id"),
+			libUpdateErr:      errors.New("backend error"),
+			expErrCode:        codes.InvalidArgument,
 		},
-		// VAC scenario A — PVC custom-vac-pvc patched to block-vac-high-iops (6000 IOPS)
 		{
-			name: "VAC block-vac-high-iops: ControllerModifyVolume sets iops=6000 on custom profile",
+			name: "GetVolume error is mapped through the backend error and ModifyVolume is not called",
 			req: &csi.ControllerModifyVolumeRequest{
-				VolumeId:          "r134-vol-custom-001",
-				MutableParameters: map[string]string{IOPS: "6000"},
-			},
-			libVolumeResponse: &provider.Volume{
-				VolumeID: "r134-vol-custom-001",
-				VPCVolume: provider.VPCVolume{
-					Profile: &provider.Profile{Name: CustomProfile},
-				},
-			},
-			expErrCode: codes.OK,
-		},
-		// VAC scenario B — PVC custom-vac-pvc patched to block-vac-low-iops (3000 IOPS)
-		{
-			name: "VAC block-vac-low-iops: ControllerModifyVolume sets iops=3000 on custom profile",
-			req: &csi.ControllerModifyVolumeRequest{
-				VolumeId:          "r134-vol-custom-001",
+				VolumeId:          "test-vol-id",
 				MutableParameters: map[string]string{IOPS: "3000"},
 			},
-			libVolumeResponse: &provider.Volume{
-				VolumeID: "r134-vol-custom-001",
-				VPCVolume: provider.VPCVolume{
-					Profile: &provider.Profile{Name: CustomProfile},
-				},
-			},
-			expErrCode: codes.OK,
+			libVolumeErr:    errors.New("backend error"),
+			expErrCode:      codes.InvalidArgument,
+			expNoModifyCall: true,
 		},
-		// VAC scenario C — PVC sdp-vac-pvc patched to block-vac-high-tp (8192 MB/s)
 		{
-			name: "VAC block-vac-high-tp: ControllerModifyVolume sets throughput=8192 on sdp profile",
+			name: "Volume not returned by GetVolume is rejected",
+			req: &csi.ControllerModifyVolumeRequest{
+				VolumeId:          "test-vol-id",
+				MutableParameters: map[string]string{IOPS: "3000"},
+			},
+			expErrCode:      codes.InvalidArgument,
+			expNoModifyCall: true,
+		},
+		{
+			name: "Volume without a profile is rejected",
+			req: &csi.ControllerModifyVolumeRequest{
+				VolumeId:          "test-vol-id",
+				MutableParameters: map[string]string{IOPS: "3000"},
+			},
+			libVolumeResponse: &provider.Volume{VolumeID: "test-vol-id"},
+			expErrCode:        codes.InvalidArgument,
+			expNoModifyCall:   true,
+		},
+		// VAC scenario A — iops=6000 on sdp profile
+		{
+			name: "VAC high iops: ControllerModifyVolume sets iops=6000 on sdp profile",
+			req: &csi.ControllerModifyVolumeRequest{
+				VolumeId:          "r134-vol-sdp-001",
+				MutableParameters: map[string]string{IOPS: "6000"},
+			},
+			libVolumeResponse: sdpVolume("r134-vol-sdp-001"),
+			expErrCode:        codes.OK,
+			expModifyReq: &provider.ModifyVolumeRequest{
+				VolumeID:          "r134-vol-sdp-001",
+				VolumePerformance: provider.VolumePerformance{Iops: 6000},
+			},
+		},
+		// VAC scenario B — decrease iops
+		{
+			name: "VAC low iops: ControllerModifyVolume decreases iops to 3000 on sdp profile",
+			req: &csi.ControllerModifyVolumeRequest{
+				VolumeId:          "r134-vol-sdp-001",
+				MutableParameters: map[string]string{IOPS: "3000"},
+			},
+			libVolumeResponse: sdpVolume("r134-vol-sdp-001"),
+			expErrCode:        codes.OK,
+			expModifyReq: &provider.ModifyVolumeRequest{
+				VolumeID:          "r134-vol-sdp-001",
+				VolumePerformance: provider.VolumePerformance{Iops: 3000},
+			},
+		},
+		// VAC scenario C — increase throughput
+		{
+			name: "VAC high throughput: ControllerModifyVolume sets throughput=8192 on sdp profile",
 			req: &csi.ControllerModifyVolumeRequest{
 				VolumeId:          "r134-vol-sdp-001",
 				MutableParameters: map[string]string{Throughput: "8192"},
 			},
-			libVolumeResponse: &provider.Volume{
-				VolumeID: "r134-vol-sdp-001",
-				VPCVolume: provider.VPCVolume{
-					Profile: &provider.Profile{Name: SDPProfile},
-				},
+			libVolumeResponse: sdpVolume("r134-vol-sdp-001"),
+			expErrCode:        codes.OK,
+			expModifyReq: &provider.ModifyVolumeRequest{
+				VolumeID:          "r134-vol-sdp-001",
+				VolumePerformance: provider.VolumePerformance{Bandwidth: 8192},
 			},
-			expErrCode: codes.OK,
 		},
-		// VAC scenario D — PVC sdp-vac-pvc patched to block-vac-low-tp (1024 MB/s)
+		// VAC scenario D — decrease throughput
 		{
-			name: "VAC block-vac-low-tp: ControllerModifyVolume sets throughput=1024 on sdp profile",
+			name: "VAC low throughput: ControllerModifyVolume decreases throughput to 1024 on sdp profile",
 			req: &csi.ControllerModifyVolumeRequest{
 				VolumeId:          "r134-vol-sdp-001",
 				MutableParameters: map[string]string{Throughput: "1024"},
 			},
-			libVolumeResponse: &provider.Volume{
-				VolumeID: "r134-vol-sdp-001",
-				VPCVolume: provider.VPCVolume{
-					Profile: &provider.Profile{Name: SDPProfile},
-				},
+			libVolumeResponse: sdpVolume("r134-vol-sdp-001"),
+			expErrCode:        codes.OK,
+			expModifyReq: &provider.ModifyVolumeRequest{
+				VolumeID:          "r134-vol-sdp-001",
+				VolumePerformance: provider.VolumePerformance{Bandwidth: 1024},
 			},
-			expErrCode: codes.OK,
 		},
-		// VAC scenario E — PVC custom-vac-pvc re-patched to block-vac-high-iops (idempotent second apply)
+		// VAC scenario E — the same VAC applied again (idempotent re-apply)
 		{
-			name: "VAC block-vac-high-iops second apply: ControllerModifyVolume idempotent iops=6000",
+			name: "VAC re-apply: ControllerModifyVolume with the same values succeeds again",
 			req: &csi.ControllerModifyVolumeRequest{
-				VolumeId:          "r134-vol-custom-001",
+				VolumeId:          "r134-vol-sdp-001",
 				MutableParameters: map[string]string{IOPS: "6000"},
 			},
-			libVolumeResponse: &provider.Volume{
-				VolumeID: "r134-vol-custom-001",
-				VPCVolume: provider.VPCVolume{
-					Profile: &provider.Profile{Name: CustomProfile},
-				},
+			libVolumeResponse: sdpVolume("r134-vol-sdp-001"),
+			expErrCode:        codes.OK,
+			expModifyReq: &provider.ModifyVolumeRequest{
+				VolumeID:          "r134-vol-sdp-001",
+				VolumePerformance: provider.VolumePerformance{Iops: 6000},
 			},
-			expErrCode: codes.OK,
 		},
-		// VAC scenario F — PVC sdp-vac-pvc patched to block-vac-combined (iops=6000 + throughput=8192)
+		// VAC scenario F — iops and throughput together
 		{
-			name: "VAC block-vac-combined: ControllerModifyVolume sets iops=6000 and throughput=8192 on sdp profile",
+			name: "VAC combined: ControllerModifyVolume sets iops=6000 and throughput=8192 on sdp profile",
 			req: &csi.ControllerModifyVolumeRequest{
 				VolumeId:          "r134-vol-sdp-001",
 				MutableParameters: map[string]string{IOPS: "6000", Throughput: "8192"},
 			},
-			libVolumeResponse: &provider.Volume{
-				VolumeID: "r134-vol-sdp-001",
-				VPCVolume: provider.VPCVolume{
-					Profile: &provider.Profile{Name: SDPProfile},
-				},
+			libVolumeResponse: sdpVolume("r134-vol-sdp-001"),
+			expErrCode:        codes.OK,
+			expModifyReq: &provider.ModifyVolumeRequest{
+				VolumeID:          "r134-vol-sdp-001",
+				VolumePerformance: provider.VolumePerformance{Iops: 6000, Bandwidth: 8192},
 			},
-			expErrCode: codes.OK,
 		},
 		// VAC with empty mutable parameters — rejected, driver does not call ModifyVolume
 		{
 			name: "VAC empty mutable parameters: returns InvalidArgument and no API call made",
 			req: &csi.ControllerModifyVolumeRequest{
-				VolumeId:          "r134-vol-custom-001",
+				VolumeId:          "r134-vol-sdp-001",
 				MutableParameters: map[string]string{},
 			},
-			libVolumeResponse: &provider.Volume{
-				VolumeID: "r134-vol-custom-001",
-				VPCVolume: provider.VPCVolume{
-					Profile: &provider.Profile{Name: CustomProfile},
-				},
-			},
-			expErrCode:      codes.InvalidArgument,
-			expNoModifyCall: true,
+			libVolumeResponse: sdpVolume("r134-vol-sdp-001"),
+			expErrCode:        codes.InvalidArgument,
+			expNoModifyCall:   true,
 		},
-		// VAC tier mismatch — iops VAC applied to 5iops-tier volume: VPC API rejects
-		// because 5iops-tier has fixed IOPS and does not accept explicit iops updates.
+		// VAC is supported only for the sdp profile. Volumes of any other profile are rejected
+		// by the driver before ModifyVolume is called.
 		{
-			name: "VAC tier mismatch: iops VAC on 5iops-tier volume returns backend error",
+			name: "VAC on custom profile volume (iops) is rejected before ModifyVolume",
+			req: &csi.ControllerModifyVolumeRequest{
+				VolumeId:          "r134-vol-custom-001",
+				MutableParameters: map[string]string{IOPS: "6000"},
+			},
+			libVolumeResponse: profileVolume("r134-vol-custom-001", CustomProfile),
+			expErrCode:        codes.InvalidArgument,
+			expNoModifyCall:   true,
+		},
+		{
+			name: "VAC on custom profile volume (throughput) is rejected before ModifyVolume",
+			req: &csi.ControllerModifyVolumeRequest{
+				VolumeId:          "r134-vol-custom-001",
+				MutableParameters: map[string]string{Throughput: "4096"},
+			},
+			libVolumeResponse: profileVolume("r134-vol-custom-001", CustomProfile),
+			expErrCode:        codes.InvalidArgument,
+			expNoModifyCall:   true,
+		},
+		{
+			name: "VAC on 5iops-tier volume is rejected before ModifyVolume",
 			req: &csi.ControllerModifyVolumeRequest{
 				VolumeId:          "r134-vol-5iops-001",
 				MutableParameters: map[string]string{IOPS: "3000"},
 			},
-			libVolumeResponse: &provider.Volume{
-				VolumeID: "r134-vol-5iops-001",
-				VPCVolume: provider.VPCVolume{
-					Profile: &provider.Profile{Name: "5iops-tier"},
-				},
-			},
-			libUpdateErr: errors.New("volume_profile_iops_conflict: IOPS cannot be set on a tier profile"),
-			expErrCode:   codes.InvalidArgument,
+			libVolumeResponse: profileVolume("r134-vol-5iops-001", "5iops-tier"),
+			expErrCode:        codes.InvalidArgument,
+			expNoModifyCall:   true,
 		},
-		// VAC tier mismatch — iops VAC applied to 10iops-tier volume
 		{
-			name: "VAC tier mismatch: iops VAC on 10iops-tier volume returns backend error",
+			name: "VAC on 10iops-tier volume is rejected before ModifyVolume",
 			req: &csi.ControllerModifyVolumeRequest{
 				VolumeId:          "r134-vol-10iops-001",
-				MutableParameters: map[string]string{IOPS: "6000"},
+				MutableParameters: map[string]string{Throughput: "4096"},
 			},
-			libVolumeResponse: &provider.Volume{
-				VolumeID: "r134-vol-10iops-001",
-				VPCVolume: provider.VPCVolume{
-					Profile: &provider.Profile{Name: "10iops-tier"},
-				},
-			},
-			libUpdateErr: errors.New("volume_profile_iops_conflict: IOPS cannot be set on a tier profile"),
-			expErrCode:   codes.InvalidArgument,
+			libVolumeResponse: profileVolume("r134-vol-10iops-001", "10iops-tier"),
+			expErrCode:        codes.InvalidArgument,
+			expNoModifyCall:   true,
 		},
-		// VAC tier mismatch — iops VAC applied to general-purpose volume
 		{
-			name: "VAC tier mismatch: iops VAC on general-purpose volume returns backend error",
+			name: "VAC on general-purpose volume is rejected before ModifyVolume",
 			req: &csi.ControllerModifyVolumeRequest{
 				VolumeId:          "r134-vol-gp-001",
 				MutableParameters: map[string]string{IOPS: "1000"},
 			},
-			libVolumeResponse: &provider.Volume{
-				VolumeID: "r134-vol-gp-001",
-				VPCVolume: provider.VPCVolume{
-					Profile: &provider.Profile{Name: "general-purpose"},
-				},
-			},
-			libUpdateErr: errors.New("volume_profile_iops_conflict: IOPS cannot be set on a tier profile"),
-			expErrCode:   codes.InvalidArgument,
-		},
-		// VAC tier mismatch — throughput VAC applied to custom profile volume:
-		// custom profiles are IOPS-based and do not accept bandwidth updates.
-		{
-			name: "VAC tier mismatch: throughput VAC on custom profile volume returns backend error",
-			req: &csi.ControllerModifyVolumeRequest{
-				VolumeId:          "r134-vol-custom-001",
-				MutableParameters: map[string]string{Throughput: "4096"},
-			},
-			libVolumeResponse: &provider.Volume{
-				VolumeID: "r134-vol-custom-001",
-				VPCVolume: provider.VPCVolume{
-					Profile: &provider.Profile{Name: CustomProfile},
-				},
-			},
-			libUpdateErr: errors.New("volume_profile_bandwidth_conflict: throughput cannot be set on a custom profile"),
-			expErrCode:   codes.InvalidArgument,
-		},
-		// VAC tier mismatch — throughput VAC applied to 5iops-tier volume
-		{
-			name: "VAC tier mismatch: throughput VAC on 5iops-tier volume returns backend error",
-			req: &csi.ControllerModifyVolumeRequest{
-				VolumeId:          "r134-vol-5iops-001",
-				MutableParameters: map[string]string{Throughput: "4096"},
-			},
-			libVolumeResponse: &provider.Volume{
-				VolumeID: "r134-vol-5iops-001",
-				VPCVolume: provider.VPCVolume{
-					Profile: &provider.Profile{Name: "5iops-tier"},
-				},
-			},
-			libUpdateErr: errors.New("volume_profile_bandwidth_conflict: throughput cannot be set on a 5iops-tier profile"),
-			expErrCode:   codes.InvalidArgument,
+			libVolumeResponse: profileVolume("r134-vol-gp-001", "general-purpose"),
+			expErrCode:        codes.InvalidArgument,
+			expNoModifyCall:   true,
 		},
 	}
 

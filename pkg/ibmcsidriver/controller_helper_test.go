@@ -255,7 +255,7 @@ func TestGetVolumeParameters(t *testing.T) {
 			},
 			expectedVolume: nil,
 			expectedStatus: false,
-			expectedError:  fmt.Errorf("VolumeAttributesClass is supported only for %s profile, volume profile is %s; please remove the volumeAttributesClassName from the PVC", SDPProfile, "5iops-tier"),
+			expectedError:  fmt.Errorf("VolumeAttributesClass is supported only for %s profile, volume profile is %q; please remove the volumeAttributesClassName from the PVC", SDPProfile, "5iops-tier"),
 		},
 		{
 			testCaseName: "Create volume with throughput on non-SDP profile fails",
@@ -320,7 +320,7 @@ func TestGetVolumeParameters(t *testing.T) {
 			},
 			expectedVolume: &provider.Volume{},
 			expectedStatus: true,
-			expectedError:  fmt.Errorf("parameter 'invalid-param' is not supported in VolumeAttributesClass; supported parameters are: %s", strings.Join(SupportedVACParams, ", ")),
+			expectedError:  fmt.Errorf("parameter 'invalid-param' is not supported in VolumeAttributesClass for %s profile; supported parameters are: %s", SDPProfile, strings.Join(SupportedVACParams[SDPProfile], ", ")),
 		},
 		{
 			testCaseName:   "Wrong profile name",
@@ -512,6 +512,56 @@ func TestGetVolumeParameters(t *testing.T) {
 				assert.Equal(t, err, testcase.expectedError)
 			} else {
 				assert.Equal(t, testcase.expectedStatus, isVolumeSame(testcase.expectedVolume, actualVolume))
+			}
+		})
+	}
+}
+
+// TestGetVolumeParametersIOPS checks the iops storage class parameter per profile.
+// isVolumeSame does not compare Iops, so it is asserted here directly.
+func TestGetVolumeParametersIOPS(t *testing.T) {
+	logger, teardown := cloudProvider.GetTestLogger(t)
+	defer teardown()
+
+	testConfig := &config.Config{
+		VPC: &config.VPCProviderConfig{ResourceGroupID: "10000000"},
+	}
+
+	testCases := []struct {
+		profile  string
+		wantIops bool
+	}{
+		{profile: CustomProfile, wantIops: true},
+		{profile: SDPProfile, wantIops: true},
+		{profile: "general-purpose", wantIops: false},
+		{profile: "5iops-tier", wantIops: false},
+		{profile: "10iops-tier", wantIops: false},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.profile, func(t *testing.T) {
+			req := &csi.CreateVolumeRequest{
+				Name:               "volName",
+				CapacityRange:      &csi.CapacityRange{RequiredBytes: 11811160064, LimitBytes: utils.MinimumVolumeSizeInBytes + utils.MinimumVolumeSizeInBytes},
+				VolumeCapabilities: []*csi.VolumeCapability{{AccessMode: &csi.VolumeCapability_AccessMode{Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER}}},
+				Parameters: map[string]string{
+					Profile:       tc.profile,
+					Zone:          "testzone",
+					Region:        "us-south-test",
+					ResourceGroup: "myresourcegroups",
+					IOPS:          "400",
+				},
+			}
+			vol, err := getVolumeParameters(logger, req, testConfig)
+			if !assert.NoError(t, err) {
+				return
+			}
+			if tc.wantIops {
+				if assert.NotNil(t, vol.Iops) {
+					assert.Equal(t, "400", *vol.Iops)
+				}
+			} else {
+				assert.Nil(t, vol.Iops)
 			}
 		})
 	}
@@ -1189,7 +1239,7 @@ func TestGetModifyVolumeParameters(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			req, err := getModifyVolumeParameters(logger, "vol-1", tc.params)
+			req, err := getModifyVolumeParameters(logger, "vol-1", SDPProfile, tc.params)
 			if tc.expErrMsg != "" {
 				assert.Nil(t, req)
 				if assert.Error(t, err) {
@@ -1199,6 +1249,33 @@ func TestGetModifyVolumeParameters(t *testing.T) {
 			}
 			assert.NoError(t, err)
 			assert.Equal(t, tc.expReq, req)
+		})
+	}
+}
+
+func TestValidateVACParams(t *testing.T) {
+	testCases := []struct {
+		name      string
+		profile   string
+		params    map[string]string
+		expErrMsg string
+	}{
+		{name: "sdp iops and throughput", profile: SDPProfile, params: map[string]string{IOPS: "3000", Throughput: "1000"}},
+		{name: "sdp bandwidth rejected", profile: SDPProfile, params: map[string]string{"bandwidth": "1000"}, expErrMsg: "parameter 'bandwidth' is not supported"},
+		{name: "custom profile rejected", profile: CustomProfile, params: map[string]string{IOPS: "3000"}, expErrMsg: "supported only for sdp profile"},
+		{name: "tier profile rejected", profile: "5iops-tier", params: map[string]string{IOPS: "3000"}, expErrMsg: "supported only for sdp profile"},
+		{name: "empty profile rejected", profile: "", params: map[string]string{IOPS: "3000"}, expErrMsg: "supported only for sdp profile"},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateVACParams(tc.profile, tc.params)
+			if tc.expErrMsg == "" {
+				assert.NoError(t, err)
+				return
+			}
+			if assert.Error(t, err) {
+				assert.Contains(t, err.Error(), tc.expErrMsg)
+			}
 		})
 	}
 }

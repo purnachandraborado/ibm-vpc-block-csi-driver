@@ -725,16 +725,26 @@ func (csiCS *CSIControllerServer) ControllerModifyVolume(ctx context.Context, re
 		return nil, commonError.GetCSIError(ctxLogger, commonError.EmptyVolumeID, requestID, nil)
 	}
 
-	// Iops and throughput from the VolumeAttributesClass are passed as they are and VPC rejects
-	// what the volume profile does not allow. Parse them before any call to the provider.
-	modifyReq, err := getModifyVolumeParameters(ctxLogger, volumeID, req.GetMutableParameters())
-	if err != nil {
-		return nil, commonError.GetCSIError(ctxLogger, commonError.InvalidParameters, requestID, err)
-	}
-
 	session, err := csiCS.CSIProvider.GetProviderSession(ctx, ctxLogger)
 	if err != nil {
 		return nil, commonError.GetCSIError(ctxLogger, commonError.FailedPrecondition, requestID, err)
+	}
+
+	// The profile of the volume decides whether a VolumeAttributesClass is supported and which
+	// parameters it may contain.
+	existingVol, err := session.GetVolume(volumeID)
+	if err != nil {
+		return nil, commonError.GetCSIBackendError(ctxLogger, requestID, err)
+	}
+	profileName := ""
+	if existingVol != nil && existingVol.Profile != nil {
+		profileName = existingVol.Profile.Name
+	}
+
+	// Validate and parse the VolumeAttributesClass parameters before calling ModifyVolume.
+	modifyReq, err := getModifyVolumeParameters(ctxLogger, volumeID, profileName, req.GetMutableParameters())
+	if err != nil {
+		return nil, commonError.GetCSIError(ctxLogger, commonError.InvalidParameters, requestID, err)
 	}
 
 	ctxLogger.Info("ModifyVolume Request",

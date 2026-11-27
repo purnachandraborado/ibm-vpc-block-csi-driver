@@ -19,7 +19,9 @@ package ibmcsidriver
 
 import (
 	"fmt"
+	"maps"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -109,7 +111,8 @@ func getVolumeParameters(logger *zap.Logger, req *csi.CreateVolumeRequest, confi
 		allParameters[key] = value
 	}
 	if mutableParams := req.GetMutableParameters(); len(mutableParams) > 0 {
-		if err := validateVACParams(mutableParams); err != nil {
+		// The profile always comes from the StorageClass, a VolumeAttributesClass cannot set it.
+		if err := validateVACParams(req.GetParameters()[Profile], mutableParams); err != nil {
 			logger.Error("getVolumeParameters", zap.NamedError("invalidParameter", err))
 			return volume, err
 		}
@@ -220,13 +223,6 @@ func getVolumeParameters(logger *zap.Logger, req *csi.CreateVolumeRequest, confi
 		return volume, err
 	}
 
-	// VolumeAttributesClass is supported only for sdp profile.
-	if len(req.GetMutableParameters()) > 0 && volume.Profile.Name != SDPProfile {
-		err := fmt.Errorf("VolumeAttributesClass is supported only for %s profile, volume profile is %s; please remove the volumeAttributesClassName from the PVC", SDPProfile, volume.Profile.Name)
-		logger.Error("getVolumeParameters", zap.NamedError("invalidParameter", err))
-		return volume, err
-	}
-
 	// Get requested capacity
 	capacityRange := req.GetCapacityRange()
 	capBytes, err := getRequestedCapacity(capacityRange, volume.Profile.Name)
@@ -285,8 +281,8 @@ func getVolumeParameters(logger *zap.Logger, req *csi.CreateVolumeRequest, confi
 		volume.Iops = nil
 	}
 
-	// throughput is a valid attribute only for sdp profile.
-	if volume.Profile.Name != SDPProfile && volume.Bandwidth > 0 {
+	// throughput is a valid attribute only for the profiles that list it in SupportedVACParams.
+	if !slices.Contains(SupportedVACParams[volume.Profile.Name], Throughput) && volume.Bandwidth > 0 {
 		err = fmt.Errorf("throughput is not supported for %s profile; please remove the throughput parameter from the storage class", volume.Profile.Name)
 		logger.Error("getVolumeParameters", zap.NamedError("invalidParameter", err))
 		return volume, err
@@ -539,32 +535,29 @@ func createCSISnapshotResponse(snapshot provider.Snapshot) *csi.CreateSnapshotRe
 	}
 }
 
-// validateVACParams ensures a VolumeAttributesClass contains only the parameters listed in SupportedVACParams
-func validateVACParams(params map[string]string) error {
+// validateVACParams ensures the profile supports a VolumeAttributesClass and that the
+// VolumeAttributesClass contains only the parameters SupportedVACParams lists for that profile.
+func validateVACParams(profile string, params map[string]string) error {
+	allowed, ok := SupportedVACParams[profile]
+	if !ok {
+		return fmt.Errorf("VolumeAttributesClass is supported only for %s profile, volume profile is %q; please remove the volumeAttributesClassName from the PVC",
+			strings.Join(slices.Sorted(maps.Keys(SupportedVACParams)), ", "), profile)
+	}
 	for key := range params {
-		supported := false
-		for _, allowed := range SupportedVACParams {
-			if key == allowed {
-				supported = true
-				break
-			}
-		}
-		if !supported {
-			return fmt.Errorf("parameter '%s' is not supported in VolumeAttributesClass; supported parameters are: %s", key, strings.Join(SupportedVACParams, ", "))
+		if !slices.Contains(allowed, key) {
+			return fmt.Errorf("parameter '%s' is not supported in VolumeAttributesClass for %s profile; supported parameters are: %s", key, profile, strings.Join(allowed, ", "))
 		}
 	}
 	return nil
 }
 
 // getModifyVolumeParameters validates the VolumeAttributesClass mutable parameters of a
-// ControllerModifyVolume request and builds the provider ModifyVolumeRequest.
-//
-// The volume profile is not checked here. Iops and throughput are passed to VPC as they are, and
-// VPC rejects what the profile does not allow (for example iops on a tiered profile, or throughput
-// on a custom profile). The skipErrorCodes of the provider make that rejection fail without retry.
-func getModifyVolumeParameters(logger *zap.Logger, volumeID string, params map[string]string) (*provider.ModifyVolumeRequest, error) {
-	// Reject parameters that are not supported at all (only 'iops' and 'throughput').
-	if err := validateVACParams(params); err != nil {
+// ControllerModifyVolume request against the profile of the volume and builds the provider
+// ModifyVolumeRequest. Iops and throughput values are passed to VPC as they are, and VPC rejects
+// values outside the allowed range of the profile.
+func getModifyVolumeParameters(logger *zap.Logger, volumeID, profile string, params map[string]string) (*provider.ModifyVolumeRequest, error) {
+	// Reject a profile without VolumeAttributesClass support and parameters the profile does not allow.
+	if err := validateVACParams(profile, params); err != nil {
 		logger.Error("getModifyVolumeParameters: unsupported parameter", zap.String("volumeID", volumeID), zap.Error(err))
 		return nil, fmt.Errorf("volume %s: %w", volumeID, err)
 	}
